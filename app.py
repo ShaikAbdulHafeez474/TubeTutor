@@ -1,4 +1,4 @@
-# 🧑‍🏫 AI-Powered YouTube Teaching Assistant — Enhanced Colorful UI
+
 
 import os
 import re
