@@ -1,0 +1,7 @@
+streamlit
+youtube-transcript-api
+langchain
+langchain-community
+langchain-core
+langchain-together
+faiss-cpu
