@@ -5,3 +5,5 @@ langchain-community
 langchain-core
 langchain-together
 faiss-cpu
+tavily-python
+
