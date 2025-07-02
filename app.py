@@ -14,7 +14,7 @@ from langchain.agents import initialize_agent, Tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 
 # Set API Keys
-os.environ["TOGETHER_API_KEY"] = ""
+os.environ["TOGETHER_API_KEY"] = "5c22e5f0d9af71d1cd7dfac4284fcde8260ca7db9c81a678387c74d0679da268"
 
 # LLM and Embeddings
 llm = ChatTogether(model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free", temperature=0.2)
