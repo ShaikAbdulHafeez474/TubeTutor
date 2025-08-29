@@ -23,7 +23,6 @@ os.environ["TAVILY_API_KEY"] = "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"
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "AIzaSyBxwCxa-6SX4yX20_7dtVRHGyEnCNCrMPE")
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
 # LLM and Embeddings
 llm = ChatTogether(model="deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free", temperature=0.2)
@@ -85,11 +84,43 @@ def extract_video_id(url):
     match = re.search(r"(?:v=|youtu\\.be/)([^&?]+)", url)
     return match.group(1) if match else None
 
+SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
-# Authenticate and create YouTube client
 def get_youtube_client():
-    flow = InstalledAppFlow.from_client_secrets_file("credentials1.json", SCOPES)
-    creds = flow.run_local_server(port=8502)
+    """
+    Returns an authenticated YouTube client.
+    Works locally and on Streamlit Cloud / headless environments.
+    """
+    creds = None
+    credentials_file = "credentials.json"
+
+    if "STREAMLIT_SERVER" in os.environ:
+        # Running on Streamlit Cloud
+        if "youtube_credentials" not in st.secrets:
+            st.error("You must add your YouTube credentials to Streamlit secrets!")
+            st.stop()
+
+        # Extract credentials from nested secrets.toml table
+        creds_dict = st.secrets["youtube_credentials"]["web"]
+
+        # Save as temporary JSON file for InstalledAppFlow
+        with open("temp_credentials.json", "w") as f:
+            json.dump(creds_dict, f)
+        credentials_file = "temp_credentials.json"
+
+    try:
+        # Detect headless (no DISPLAY) for Streamlit Cloud / Linux servers
+        if os.environ.get("DISPLAY") is None and not os.name == "nt":
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+            creds = flow.run_console()
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+            creds = flow.run_local_server(port=0)
+    except Exception as e:
+        st.error(f"Failed to authenticate YouTube client: {e}")
+        st.stop()
+
+    # Build YouTube API client
     youtube = build("youtube", "v3", credentials=creds)
     return youtube
 
