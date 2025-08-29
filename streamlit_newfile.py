@@ -1,4 +1,4 @@
-# 🧑‍🏫 AI-Powered YouTube Teaching Assistant — Enhanced Colorful UI
+# 🧑‍🏫 AI-Powered YouTube Teaching Assistant — Service Account Version
 
 import os
 import re
@@ -14,22 +14,24 @@ from langchain.agents import initialize_agent, Tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2 import service_account
 
 # -------------------------
 # Streamlit Secrets Setup
 # -------------------------
-# In your secrets.toml, add:
-
-# [youtube_credentials.web]
-# client_id = "..."
-# project_id = "..."
+# In your secrets.toml, add your service account JSON:
+#
+# [gcp_service_account]
+# type = "service_account"
+# project_id = "your-project-id"
+# private_key_id = "xxxxxx"
+# private_key = "-----BEGIN PRIVATE KEY-----\nYOURKEY\n-----END PRIVATE KEY-----\n"
+# client_email = "your-service-account@your-project-id.iam.gserviceaccount.com"
+# client_id = "123456789012345678901"
 # auth_uri = "https://accounts.google.com/o/oauth2/auth"
 # token_uri = "https://oauth2.googleapis.com/token"
 # auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-# client_secret = "..."
-# redirect_uris = ["https://TubeTutor-App.streamlit.app"]
-# javascript_origins = ["https://TubeTutor-App.streamlit.app"]
+# client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project-id.iam.gserviceaccount.com"
 
 # -------------------------
 # API Keys
@@ -103,41 +105,24 @@ def extract_video_id(url):
     match = re.search(r"(?:v=|youtu\.be/)([^&?]+)", url)
     return match.group(1) if match else None
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 
 def get_youtube_client():
     """
-    Returns an authenticated YouTube client using Streamlit secrets.
-    Works locally and on Streamlit Cloud.
+    Returns an authenticated YouTube client using a Service Account (from Streamlit secrets).
     """
-    if "youtube_credentials" not in st.secrets:
-        st.error("You must add your YouTube credentials to Streamlit secrets!")
+    if "gcp_service_account" not in st.secrets:
+        st.error("❌ Missing service account in Streamlit secrets!")
         st.stop()
 
-    creds_dict = st.secrets["youtube_credentials"]["web"]
-
-    # Save credentials as temp JSON for InstalledAppFlow
-    temp_file = "temp_credentials.json"
-    with open(temp_file, "w") as f:
-    # Convert AttrDict to regular dict before writing
-      json.dump(dict(st.secrets["youtube_credentials"]["web"]), f)
-    try:
-        # Detect headless environment
-        if os.environ.get("DISPLAY") is None and not os.name == "nt":
-            flow = InstalledAppFlow.from_client_secrets_file(temp_file, SCOPES)
-            creds = flow.run_console()
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(temp_file, SCOPES)
-            creds = flow.run_local_server(port=0)
-    except Exception as e:
-        st.error(f"Failed to authenticate YouTube client: {e}")
-        st.stop()
-
+    creds = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=SCOPES
+    )
     youtube = build("youtube", "v3", credentials=creds)
     return youtube
 
 def get_transcript(video_id, llm=None, translate_to_english=True):
-    """Fetches captions of a YouTube video using OAuth credentials."""
+    """Fetches captions of a YouTube video using Service Account credentials."""
     try:
         youtube = get_youtube_client()
 
@@ -208,7 +193,7 @@ def compare_videos(t1, t2):
     return llm.invoke(compare_prompt.invoke({"transcript1": t1, "transcript2": t2})).content
 
 # -------------------------
-# Streamlit UI
+# Streamlit UI (same as before)
 # -------------------------
 st.set_page_config(page_title="🎨 AI Teaching Assistant", layout="centered")
 
@@ -220,6 +205,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align:center;color:#154360;'>🎓 AI Teaching Assistant</h1>", unsafe_allow_html=True)
+
+# --- rest of UI stays same ---
 
 option = st.selectbox("🎯 What do you want to do?", [
     "Summarize",
