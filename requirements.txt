@@ -1,9 +1,13 @@
 streamlit
-youtube-transcript-api
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
 langchain
 langchain-community
 langchain-core
 langchain-together
 faiss-cpu
 tavily-python
+
 
