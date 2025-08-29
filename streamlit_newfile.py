@@ -118,7 +118,7 @@ def get_youtube_client():
 
     # Save credentials as temp JSON for InstalledAppFlow
     temp_file = "temp_credentials.json"
-  with open(temp_file, "w") as f:
+    with open(temp_file, "w") as f:
     # Convert AttrDict to regular dict before writing
     json.dump(dict(st.secrets["youtube_credentials"]["web"]), f)
     try:
