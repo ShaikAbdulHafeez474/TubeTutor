@@ -2,6 +2,7 @@
 
 import os
 import re
+import json
 import streamlit as st
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -14,21 +15,37 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
-import re
 
-# Set API Keys
+# -------------------------
+# Streamlit Secrets Setup
+# -------------------------
+# In your secrets.toml, add:
+
+# [youtube_credentials.web]
+# client_id = "..."
+# project_id = "..."
+# auth_uri = "https://accounts.google.com/o/oauth2/auth"
+# token_uri = "https://oauth2.googleapis.com/token"
+# auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+# client_secret = "..."
+# redirect_uris = ["https://TubeTutor-App.streamlit.app"]
+# javascript_origins = ["https://TubeTutor-App.streamlit.app"]
+
+# -------------------------
+# API Keys
+# -------------------------
 os.environ["TOGETHER_API_KEY"] = "5c22e5f0d9af71d1cd7dfac4284fcde8260ca7db9c81a678387c74d0679da268"
-
 os.environ["TAVILY_API_KEY"] = "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"
 
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "AIzaSyBxwCxa-6SX4yX20_7dtVRHGyEnCNCrMPE")
-
-
-# LLM and Embeddings
+# -------------------------
+# LLM & Embeddings
+# -------------------------
 llm = ChatTogether(model="deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free", temperature=0.2)
 embeddings = TogetherEmbeddings(model="togethercomputer/m2-bert-80M-32k-retrieval")
 
+# -------------------------
 # Prompts
+# -------------------------
 note_prompt = PromptTemplate(
     template="""
     You're a note-taking assistant. Convert the following transcript into clear, concise lecture notes:
@@ -79,70 +96,51 @@ compare_prompt = PromptTemplate(
     input_variables=["transcript1", "transcript2"]
 )
 
+# -------------------------
 # Helper Functions
+# -------------------------
 def extract_video_id(url):
-    match = re.search(r"(?:v=|youtu\\.be/)([^&?]+)", url)
+    match = re.search(r"(?:v=|youtu\.be/)([^&?]+)", url)
     return match.group(1) if match else None
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 def get_youtube_client():
     """
-    Returns an authenticated YouTube client.
-    Works locally and on Streamlit Cloud / headless environments.
+    Returns an authenticated YouTube client using Streamlit secrets.
+    Works locally and on Streamlit Cloud.
     """
-    creds = None
-    credentials_file = "credentials.json"
+    if "youtube_credentials" not in st.secrets:
+        st.error("You must add your YouTube credentials to Streamlit secrets!")
+        st.stop()
 
-    if "STREAMLIT_SERVER" in os.environ:
-        # Running on Streamlit Cloud
-        if "youtube_credentials" not in st.secrets:
-            st.error("You must add your YouTube credentials to Streamlit secrets!")
-            st.stop()
+    creds_dict = st.secrets["youtube_credentials"]["web"]
 
-        # Extract credentials from nested secrets.toml table
-        creds_dict = st.secrets["youtube_credentials"]["web"]
-
-        # Save as temporary JSON file for InstalledAppFlow
-        with open("temp_credentials.json", "w") as f:
-            json.dump(creds_dict, f)
-        credentials_file = "temp_credentials.json"
+    # Save credentials as temp JSON for InstalledAppFlow
+    temp_file = "temp_credentials.json"
+    with open(temp_file, "w") as f:
+        json.dump(creds_dict, f)
 
     try:
-        # Detect headless (no DISPLAY) for Streamlit Cloud / Linux servers
+        # Detect headless environment
         if os.environ.get("DISPLAY") is None and not os.name == "nt":
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(temp_file, SCOPES)
             creds = flow.run_console()
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(temp_file, SCOPES)
             creds = flow.run_local_server(port=0)
     except Exception as e:
         st.error(f"Failed to authenticate YouTube client: {e}")
         st.stop()
 
-    # Build YouTube API client
     youtube = build("youtube", "v3", credentials=creds)
     return youtube
 
-
-# Fetch transcript
 def get_transcript(video_id, llm=None, translate_to_english=True):
-    """
-    Fetches captions of a YouTube video using OAuth credentials.
-    Optionally translates to English using the provided LLM.
-
-    Parameters:
-        video_id (str): YouTube video ID
-        llm: Your ChatTogether LLM instance
-        translate_to_english (bool): If True, translate non-English captions
-
-    Returns:
-        str: Transcript text or None if unavailable
-    """
+    """Fetches captions of a YouTube video using OAuth credentials."""
     try:
         youtube = get_youtube_client()
 
-        # Get available captions
         captions_response = youtube.captions().list(
             part="snippet",
             videoId=video_id
@@ -150,34 +148,27 @@ def get_transcript(video_id, llm=None, translate_to_english=True):
 
         captions = captions_response.get("items", [])
         if not captions:
-            return None  # No captions available
+            return None
 
-        # Prefer English captions
-        caption_id = None
-        lang = None
+        caption_id, lang = None, None
         for cap in captions:
             if cap['snippet']['language'] in ['en', 'en-US']:
                 caption_id = cap['id']
                 lang = 'en'
                 break
-
-        # If no English, pick first available
         if not caption_id:
             caption_id = captions[0]['id']
             lang = captions[0]['snippet']['language']
 
-        # Download caption in SRT format
         caption_response = youtube.captions().download(
             id=caption_id,
             tfmt="srt"
         ).execute()
 
         srt_text = caption_response.decode("utf-8")
-        # Remove SRT numbers and timestamps
         transcript = re.sub(r"\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n", "", srt_text)
         transcript = re.sub(r"\n+", " ", transcript).strip()
 
-        # Translate if not English and LLM provided
         if translate_to_english and lang != 'en' and llm:
             prompt = f"Translate the following transcript into clear English:\n\n{transcript}"
             transcript = llm.invoke(prompt).content
@@ -185,10 +176,8 @@ def get_transcript(video_id, llm=None, translate_to_english=True):
         return transcript
 
     except HttpError as e:
-        print(f"Error fetching captions: {e}")
+        st.error(f"Error fetching captions: {e}")
         return None
-
-
 
 def split_transcript(transcript):
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -218,44 +207,19 @@ def find_resources(query):
 def compare_videos(t1, t2):
     return llm.invoke(compare_prompt.invoke({"transcript1": t1, "transcript2": t2})).content
 
+# -------------------------
 # Streamlit UI
+# -------------------------
 st.set_page_config(page_title="🎨 AI Teaching Assistant", layout="centered")
-st.markdown("""
-    <style>
-    .main {
-        background: linear-gradient(145deg, #f0f4f8, #c3e0e5);
-        padding: 2rem;
-        border-radius: 12px;
-    }
-    .stTextInput>div>div>input {
-        border-radius: 0.75rem;
-        border: 2px solid #5dade2;
-        background-color: #fefefe;
-    }
-    .stSelectbox>div>div>div {
-        border-radius: 0.75rem;
-        background-color: #ebf5fb;
-        font-weight: bold;
-        color: #2e4053;
-    }
-    .stButton>button {
-        border-radius: 0.5rem;
-        background: linear-gradient(to right, #00c6ff, #0072ff);
-        color: white;
-        font-weight: bold;
-        padding: 0.6rem 1.2rem;
-    }
-    .block-container {
-        padding: 2rem 3rem;
-    }
-    </style>
-""", unsafe_allow_html=True)
 
 st.markdown("""
-    <h1 style='text-align: center; color: #154360;'>🎓 AI Teaching Assistant</h1>
-    <p style='text-align: center; font-size: 18px; color: #1b2631;'>Transform YouTube videos into interactive, intelligent content effortlessly!</p>
-    <hr style='border-top: 1px solid #aed6f1;'>
+<style>
+.block-container { padding: 2rem 3rem; }
+.stButton>button { border-radius: 0.5rem; background: linear-gradient(to right, #00c6ff, #0072ff); color: white; font-weight: bold; padding: 0.6rem 1.2rem; }
+</style>
 """, unsafe_allow_html=True)
+
+st.markdown("<h1 style='text-align:center;color:#154360;'>🎓 AI Teaching Assistant</h1>", unsafe_allow_html=True)
 
 option = st.selectbox("🎯 What do you want to do?", [
     "Summarize",
@@ -290,12 +254,7 @@ elif transcript:
             "context": retriever | RunnableLambda(format_docs),
             "question": RunnablePassthrough()
         }) | PromptTemplate(
-            template="""
-            You are a helpful assistant. Use only the provided context to answer.
-
-            {context}
-            Question: {question}
-            """,
+            template="You are a helpful assistant. Use only the provided context to answer.\n\n{context}\nQuestion: {question}",
             input_variables=["context", "question"]
         ) | llm | StrOutputParser()
         summary = chain.invoke(question)
@@ -309,12 +268,7 @@ elif transcript:
                 "context": retriever | RunnableLambda(format_docs),
                 "question": RunnablePassthrough()
             }) | PromptTemplate(
-                template="""
-                You are a helpful assistant. Use only the provided context to answer.
-
-                {context}
-                Question: {question}
-                """,
+                template="You are a helpful assistant. Use only the provided context to answer.\n\n{context}\nQuestion: {question}",
                 input_variables=["context", "question"]
             ) | llm | StrOutputParser()
             answer = chain.invoke(custom_q)
