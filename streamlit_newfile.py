@@ -120,7 +120,7 @@ def get_youtube_client():
     temp_file = "temp_credentials.json"
     with open(temp_file, "w") as f:
     # Convert AttrDict to regular dict before writing
-    json.dump(dict(st.secrets["youtube_credentials"]["web"]), f)
+      json.dump(dict(st.secrets["youtube_credentials"]["web"]), f)
     try:
         # Detect headless environment
         if os.environ.get("DISPLAY") is None and not os.name == "nt":
